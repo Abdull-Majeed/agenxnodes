@@ -35,7 +35,7 @@
 
 ## 📦 Installation
 
-### 1. Backend (Server)
+### 1. Backend (Server) and Fronted (Client) 
 ```bash
 cd server
 npm install
