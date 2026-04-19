@@ -3,70 +3,126 @@ import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 
 const Login = () => {
-    const [creds, setCreds] = useState({ username: '', password: '' });
-    const [toast, setToast] = useState(null); // Local Toast State
-    const navigate = useNavigate();
+  const [creds, setCreds] = useState({ username: '', password: '' });
+  const [toast, setToast] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const navigate = useNavigate();
 
-    // Auto-hide toast
-    useEffect(() => { if (toast) setTimeout(() => setToast(null), 3000) }, [toast]);
+  useEffect(() => {
+    if (toast) setTimeout(() => setToast(null), 3000);
+  }, [toast]);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+  const handleSubmit = async (e) => {
+    e.preventDefault();
 
-        // Basic Client Validation
-        if (!creds.username || !creds.password) {
-            setToast({ msg: "Please fill in all fields", type: "error" });
-            return;
-        }
+    if (!creds.username || !creds.password) {
+      setToast({ msg: "Please fill in all fields", type: "error" });
+      return;
+    }
 
-        try {
-            const { data } = await axios.post('http://localhost:5005/api/auth/login', creds);
+    setIsSubmitting(true);
+    try {
+      const { data } = await axios.post('http://localhost:5005/api/auth/login', creds);
+      setToast({ msg: "Login successful. Redirecting...", type: "success" });
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('username', data.username);
+      setTimeout(() => navigate('/dashboard'), 900);
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || "Login failed. Please try again.";
+      setToast({ msg: errorMsg, type: "error" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-            // Success
-            setToast({ msg: "Login Successful! Redirecting...", type: "success" });
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('username', data.username);
+  const toastStyle = toast?.type === "success"
+    ? "bg-emerald-600 text-white"
+    : toast?.type === "error"
+      ? "bg-rose-600 text-white"
+      : "bg-indigo-600 text-white";
 
-            setTimeout(() => navigate('/dashboard'), 1000);
+  return (
+    <div className="relative min-h-screen w-full overflow-hidden px-6 py-12">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.16),transparent_55%),radial-gradient(circle_at_bottom,_rgba(14,165,233,0.12),transparent_50%)]" />
+      <div className="pointer-events-none absolute -left-20 top-10 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -right-24 bottom-10 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
 
-        } catch (err) {
-            // Specific Error Handling
-            const errorMsg = err.response?.data?.error || "Login Failed. Check console.";
-            setToast({ msg: errorMsg, type: "error" });
-        }
-    };
-
-    return (
-        <div className="auth-container">
-            <div className="auth-box">
-                <div className="auth-logo">⚡</div>
-                <h2>Login to AgenxNodes</h2>
-                <form onSubmit={handleSubmit}>
-                    <input
-                        type="text"
-                        placeholder="Username"
-                        value={creds.username}
-                        onChange={e => setCreds({ ...creds, username: e.target.value })}
-                    />
-                    <input
-                        type="password"
-                        placeholder="Password"
-                        value={creds.password}
-                        onChange={e => setCreds({ ...creds, password: e.target.value })}
-                    />
-                    <button type="submit" className="btn pri full-width">Login</button>
-                </form>
-                <p>New here? <Link to="/signup">Create an account</Link></p>
+      <div className="relative mx-auto flex min-h-[calc(100vh-6rem)] w-full max-w-lg items-center justify-center">
+        <div className="glass-panel-strong w-full rounded-3xl border border-white/70 p-8 shadow-glass">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/80 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-white"
+          >
+            Back
+          </button>
+          <div className="flex flex-col items-center text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-xs font-bold uppercase tracking-[0.3em] text-white">
+              AX
             </div>
+            <p className="mt-4 text-xs uppercase tracking-[0.4em] text-slate-500">Welcome back</p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Sign in to AgenXNodes</h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Manage AI workflows and monitor agents from one premium workspace.
+            </p>
+          </div>
 
-            {/* Local Toast Component */}
-            {toast && (
-                <div className={`toast ${toast.type}`}>
-                    {toast.type === 'error' ? '⚠️' : '✅'} {toast.msg}
-                </div>
-            )}
+          <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+            <div>
+              <label className="text-xs font-semibold text-slate-600">Username</label>
+              <input
+                type="text"
+                placeholder="Enter your username"
+                value={creds.username}
+                onChange={(e) => setCreds({ ...creds, username: e.target.value })}
+                className="mt-2 w-full rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">Password</label>
+              <input
+                type="password"
+                placeholder="Enter your password"
+                value={creds.password}
+                onChange={(e) => setCreds({ ...creds, password: e.target.value })}
+                className="mt-2 w-full rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-soft transition hover:-translate-y-0.5 hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-70"
+            >
+              {isSubmitting ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  Signing in
+                </>
+              ) : (
+                "Sign In"
+              )}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center text-xs text-slate-500">
+            New here?{" "}
+            <Link className="font-semibold text-indigo-600 hover:text-indigo-500" to="/signup">
+              Create an account
+            </Link>
+          </div>
         </div>
-    );
+      </div>
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+          <div className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold shadow-glass ${toastStyle}`}>
+            <span className="h-2 w-2 rounded-full bg-white/80" />
+            {toast.msg}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default Login;

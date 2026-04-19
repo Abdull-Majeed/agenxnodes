@@ -1,10 +1,10 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Login from '../pages/Login';
+import Landing from '../pages/Landing';
 import Signup from '../pages/Signup';
 import Dashboard from '../pages/Dashboard';
 import Editor from '../pages/Editor';
-import './App.css';
+import Login from '../pages/Login';
 
 const PrivateRoute = ({ children }) => {
   const token = localStorage.getItem('token');
@@ -22,6 +22,14 @@ const App = () => {
       <Routes>
         <Route
           path="/"
+          element={
+            <PublicRoute>
+              <Login />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/login"
           element={
             <PublicRoute>
               <Login />
@@ -53,6 +61,7 @@ const App = () => {
             </PrivateRoute>
           }
         />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
   );
