@@ -20,11 +20,17 @@ import { NODE_DEFINITIONS } from '../constants/nodes';
 const CREDENTIAL_GUIDES = {
   gemini: { title: "Google Gemini", url: "https://aistudio.google.com/app/apikey", instructions: "1. Click the link.\n2. Click 'Create API Key'.\n3. Copy the key and paste it here." },
   openai: { title: "OpenAI", url: "https://platform.openai.com/api-keys", instructions: "1. Sign up/Login.\n2. Create new secret key.\n3. Ensure you have billing credits." },
+  anthropic: { title: "Anthropic Claude", url: "https://console.anthropic.com/", instructions: "1. Sign up/Login.\n2. Go to API Keys.\n3. Create a new key." },
   huggingface: { title: "Hugging Face", url: "https://huggingface.co/settings/tokens", instructions: "1. Go to Settings > Access Tokens.\n2. Create a 'Write' token." },
+  aiAgent: { title: "AI Agent (Gemini)", url: "https://aistudio.google.com/app/apikey", instructions: "1. Get a Gemini API Key (same as Google Gemini).\n2. Paste it in the API Key field.\n3. Set a goal/task for the agent." },
   sheets: { title: "Google Sheets", url: "https://console.cloud.google.com/", instructions: "1. Create Service Account.\n2. Download JSON Key.\n3. Share your sheet with the client_email." },
   discord: { title: "Discord", url: "https://support.discord.com/hc/en-us/articles/228383668", instructions: "1. Go to Server Settings > Integrations > Webhooks.\n2. Create Webhook.\n3. Copy URL." },
   slack: { title: "Slack", url: "https://api.slack.com/messaging/webhooks", instructions: "1. Create New App.\n2. Activate Incoming Webhooks.\n3. Copy Webhook URL." },
-  email: { title: "Gmail", url: "https://myaccount.google.com/apppasswords", instructions: "1. Enable 2FA on Google.\n2. Search 'App Passwords'.\n3. Generate password for 'Mail'." }
+  email: { title: "Gmail", url: "https://myaccount.google.com/apppasswords", instructions: "1. Enable 2FA on Google.\n2. Search 'App Passwords'.\n3. Generate password for 'Mail'." },
+  telegram: { title: "Telegram Bot", url: "https://t.me/BotFather", instructions: "1. Open @BotFather on Telegram.\n2. Send /newbot and follow prompts.\n3. Copy the bot token." },
+  stripe: { title: "Stripe", url: "https://dashboard.stripe.com/apikeys", instructions: "1. Sign up/Login to Stripe Dashboard.\n2. Go to Developers > API Keys.\n3. Copy Secret Key." },
+  airtable: { title: "Airtable", url: "https://airtable.com/create/tokens", instructions: "1. Go to Developer Hub.\n2. Create a Personal Access Token.\n3. Add scopes for your base." },
+  notion: { title: "Notion", url: "https://www.notion.so/my-integrations", instructions: "1. Create a new integration.\n2. Copy the Internal Integration Token.\n3. Share your database with the integration." }
 };
 
 const initialNodes = [
@@ -592,35 +598,43 @@ const Editor = () => {
 
                       {selectedDef.fields.map((field) => (
                         <div key={field.name}>
-                          <label className="text-xs font-semibold text-slate-600">{field.label}</label>
-                          {field.type === 'textarea' ? (
-                            <textarea
-                              rows="3"
-                              value={selectedNode.data.config[field.name] || ''}
-                              onChange={(e) => updateConfig(field.name, e.target.value)}
-                              placeholder={field.placeholder}
-                              className="mt-2 w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20"
-                            />
-                          ) : field.type === 'select' ? (
-                            <select
-                              value={selectedNode.data.config[field.name] || field.options?.[0] || ''}
-                              onChange={(e) => updateConfig(field.name, e.target.value)}
-                              className="mt-2 w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20"
-                            >
-                              {field.options?.map((option) => (
-                                <option key={option} value={option}>
-                                  {option}
-                                </option>
-                              ))}
-                            </select>
+                          {field.type === 'header' ? (
+                            <div className="mt-2 border-t border-slate-200/60 pt-3 text-xs font-bold uppercase tracking-wide text-indigo-600">
+                              {field.label}
+                            </div>
                           ) : (
-                            <input
-                              type={field.type}
-                              value={selectedNode.data.config[field.name] || ''}
-                              onChange={(e) => updateConfig(field.name, e.target.value)}
-                              placeholder={field.placeholder}
-                              className="mt-2 w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20"
-                            />
+                            <>
+                              <label className="text-xs font-semibold text-slate-600">{field.label}</label>
+                              {field.type === 'textarea' ? (
+                                <textarea
+                                  rows="3"
+                                  value={selectedNode.data.config[field.name] || ''}
+                                  onChange={(e) => updateConfig(field.name, e.target.value)}
+                                  placeholder={field.placeholder}
+                                  className="mt-2 w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20"
+                                />
+                              ) : field.type === 'select' ? (
+                                <select
+                                  value={selectedNode.data.config[field.name] || field.options?.[0] || ''}
+                                  onChange={(e) => updateConfig(field.name, e.target.value)}
+                                  className="mt-2 w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20"
+                                >
+                                  {field.options?.map((option) => (
+                                    <option key={option} value={option}>
+                                      {option}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  type={field.type}
+                                  value={selectedNode.data.config[field.name] || ''}
+                                  onChange={(e) => updateConfig(field.name, e.target.value)}
+                                  placeholder={field.placeholder}
+                                  className="mt-2 w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20"
+                                />
+                              )}
+                            </>
                           )}
                         </div>
                       ))}
