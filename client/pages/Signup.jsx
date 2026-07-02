@@ -26,7 +26,7 @@ const Signup = () => {
 
     setIsSubmitting(true);
     try {
-      const res = await axios.post('http://localhost:5005/api/auth/signup', creds);
+      const res = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5005'}/api/auth/signup`, creds);
       setToast({ msg: res.data.message, type: "success" });
       setTimeout(() => navigate('/login'), 1200);
     } catch (err) {

@@ -22,7 +22,7 @@ const Login = () => {
 
     setIsSubmitting(true);
     try {
-      const { data } = await axios.post('http://localhost:5005/api/auth/login', creds);
+      const { data } = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5005'}/api/auth/login`, creds);
       setToast({ msg: "Login successful. Redirecting...", type: "success" });
       localStorage.setItem('token', data.token);
       localStorage.setItem('username', data.username);

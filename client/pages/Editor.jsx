@@ -75,7 +75,7 @@ const Editor = () => {
     const load = async () => {
       setIsLoadingWorkflow(true);
       try {
-        const { data } = await axios.get(`http://localhost:5005/api/workflows/${id}`, {
+        const { data } = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5005'}/api/workflows/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (data) {
@@ -138,7 +138,7 @@ const Editor = () => {
     setIsGenerating(true);
     try {
       const { data } = await axios.post(
-        'http://localhost:5005/api/generate-workflow',
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5005'}/api/generate-workflow`,
         { prompt: aiPrompt },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -181,7 +181,7 @@ const Editor = () => {
 
   const saveWorkflow = async () => {
     await axios.post(
-      'http://localhost:5005/api/workflows',
+      `${import.meta.env.VITE_API_URL || 'http://localhost:5005'}/api/workflows`,
       { id, name: workflowName, nodes, edges },
       { headers: { Authorization: `Bearer ${token}` } }
     );
@@ -193,17 +193,41 @@ const Editor = () => {
     setToast({ msg: "Starting run...", type: "info" });
     setNodes((nds) => nds.map((n) => ({ ...n, data: { ...n.data, status: 'idle' } })));
     try {
-      const { data } = await axios.post('http://localhost:5005/api/run', { nodes, edges });
-      for (const log of data.logs) {
-        setNodes((nds) =>
-          nds.map((n) =>
-            n.id === log.nodeId ? { ...n, data: { ...n.data, status: log.status } } : n
-          )
-        );
-        if (log.status === 'error') setToast({ msg: log.output.error, type: 'error' });
-        await new Promise((r) => setTimeout(r, 600));
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5005'}/api/run-stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodes, edges })
+      });
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete chunk in buffer
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const data = JSON.parse(line);
+
+          if (data.type === 'start') {
+            setNodes((nds) => nds.map((n) => n.id === data.nodeId ? { ...n, data: { ...n.data, status: 'running' } } : n));
+          } else if (data.type === 'finish') {
+            const log = data.log;
+            setNodes((nds) => nds.map((n) => n.id === log.nodeId ? { ...n, data: { ...n.data, status: log.status } } : n));
+            if (log.status === 'error') setToast({ msg: log.output.error, type: 'error' });
+          } else if (data.type === 'done') {
+            setToast({ msg: "All agents completed.", type: "success" });
+          } else if (data.type === 'error') {
+            setToast({ msg: data.error, type: "error" });
+          }
+        }
       }
-      if (data.logs.every((l) => l.status === 'success')) setToast({ msg: "All agents completed.", type: "success" });
     } catch (e) {
       setToast({ msg: "Execution error.", type: "error" });
     }

@@ -12,21 +12,36 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 // Dynamic Configuration from .env
-const PORT = process.env.PORT || 5005;
+const PORT = parseInt(process.env.PORT, 10) || 5005;
+const HOST = process.env.HOST || '0.0.0.0';
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "default_secret";
 
+// ==========================================
+// ERROR HANDLING FOR UNHANDLED REJECTIONS
+// ==========================================
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('❌ Uncaught Exception:', error);
+    process.exit(1);
+});
+
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
 app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
 // ==========================================
-// 1. DATABASE CONNECTION
+// 1. DATABASE CONNECTION (Non-blocking)
 // ==========================================
 mongoose.connect(MONGO_URI)
     .then(() => console.log(`\n✅ MongoDB Connected`))
     .catch(err => {
         console.error(`\n❌ MongoDB Connection Error: ${err.message}`);
         console.error("-> Check your .env file password and username.");
+        console.error("-> Server will continue running without database.");
     });
 
 const UserSchema = new mongoose.Schema({ username: { type: String, unique: true }, password: String });
@@ -176,13 +191,41 @@ const nodeHandlers = {
         };
     },
 
-    'chatTrigger': async (config) => ({
-        msg: "Chat Trigger Fired",
-        form_text: config.testMessage || "Hello, this is a chat message",
-        ai_text: config.testMessage || "Hello, this is a chat message",
-        user_message: config.testMessage || "Hello, this is a chat message",
-        timestamp: new Date().toISOString()
-    }),
+    'chatTrigger': async (config, input) => {
+        const text = input.user_message || config.testMessage || "Hello, this is a chat message";
+        return { 
+            msg: "Chat Trigger Fired", 
+            form_text: text,
+            ai_text: text,
+            user_message: text,
+            timestamp: new Date().toISOString(),
+            ...input 
+        };
+    },
+
+    'telegramTrigger': async (config, input) => {
+        const text = input.user_message || config.testData || "Hello from Telegram";
+        return { 
+            msg: "Telegram Trigger Fired", 
+            form_text: text,
+            ai_text: text,
+            user_message: text,
+            timestamp: new Date().toISOString(),
+            ...input 
+        };
+    },
+
+    'whatsappTrigger': async (config, input) => {
+        const text = input.user_message || config.testData || "Hello from WhatsApp";
+        return { 
+            msg: "WhatsApp Trigger Fired", 
+            form_text: text,
+            ai_text: text,
+            user_message: text,
+            timestamp: new Date().toISOString(),
+            ...input 
+        };
+    },
 
     'databaseTrigger': async (config) => ({
         msg: "Database Trigger Fired",
@@ -201,7 +244,7 @@ const nodeHandlers = {
         if (!config.apiKey) throw new Error("Missing Gemini API Key. Get one at: https://aistudio.google.com/app/apikey");
         const model = config.model || "gemini-2.5-flash";
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.apiKey}`;
-        const ctx = input.form_text || input.ai_text || input.hf_result || "";
+        const ctx = input.ai_text || input.form_text || input.hf_result || "";
         const prompt = `${config.prompt || 'Process the following:'}\nContext: ${ctx}`;
         try {
             const res = await safeAxios({
@@ -211,7 +254,29 @@ const nodeHandlers = {
             }, 30000);
             const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
             if (!text) throw new Error("Empty response from Gemini");
-            return { ai_text: text };
+
+            // --- Smart Email Parsing ---
+            // If the AI response contains TO:/SUBJECT:/BODY: format, extract them
+            // so the downstream Email node can use them dynamically
+            const result = { ai_text: text };
+
+            // Clean up common markdown that breaks parsing (like **TO:** or code blocks)
+            const cleanText = text.replace(/\*\*/g, '').replace(/```[a-z]*/gi, '').trim();
+            const toMatch = cleanText.match(/^TO:\s*(.+)$/mi);
+            const subjectMatch = cleanText.match(/^SUBJECT:\s*(.+)$/mi);
+            const bodyMatch = cleanText.match(/^BODY:\s*([\s\S]*)$/im);
+
+            if (toMatch) result.email_to = toMatch[1].trim();
+            if (subjectMatch) result.email_subject = subjectMatch[1].trim();
+            if (bodyMatch) {
+                // Clean up: get everything after BODY: (the actual email content)
+                let body = bodyMatch[1].trim();
+                // Remove any trailing markers if present
+                body = body.replace(/^---+$/gm, '').trim();
+                result.email_body = body;
+            }
+
+            return result;
         } catch (e) {
             throw new Error(`Gemini Error: ${e.response?.data?.error?.message || e.message}`);
         }
@@ -262,7 +327,7 @@ const nodeHandlers = {
 
     'anthropic': async (config, input) => {
         if (!config.apiKey) throw new Error("Missing Anthropic API Key. Get one at: https://console.anthropic.com/");
-        const ctx = input.form_text || input.ai_text || "";
+        const ctx = input.ai_text || input.form_text || "";
         const prompt = `${config.prompt || 'Process this:'}\n${ctx}`;
         try {
             const res = await safeAxios({
@@ -325,7 +390,7 @@ const nodeHandlers = {
         const goal = config.goal || "Analyze the given data and provide insights";
         const temperature = parseFloat(config.temperature) || 0.7;
         const memoryType = config.memoryType || 'none';
-        const ctx = input.form_text || input.ai_text || input.user_message || JSON.stringify(input);
+        const ctx = input.ai_text || input.form_text || input.user_message || JSON.stringify(input);
 
         // --- Build enabled tools list ---
         const enabledTools = [];
@@ -527,14 +592,60 @@ Be thorough, precise, and structure your output clearly.`;
     // --- COMMUNICATION ---
     // =====================
     'email': async (config, input) => {
+        console.log("\n==============================================");
+        console.log("📧 [EMAIL NODE] EXECUTION STARTED");
+        console.log("==============================================");
+        console.log("-> Configured Gmail:", config.user || "MISSING!");
+        console.log("-> App Password length:", config.pass ? config.pass.length : "MISSING!");
+
         if (!config.user) throw new Error("Missing Gmail address. Go to Node Settings and enter your Gmail.");
         if (!config.pass) throw new Error("Missing Gmail App Password. Generate one at: https://myaccount.google.com/apppasswords");
-        if (!config.to) throw new Error("Missing recipient email address (To field).");
-        const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: config.user, pass: config.pass } });
-        const body = config.text || input.ai_text || input.form_text || "No Content";
-        const subject = config.subject || "AgenXNodes Notification";
-        await transporter.sendMail({ from: config.user, to: config.to, subject, text: body });
-        return { status: "Email Sent", to: config.to, subject };
+
+        const cleanUser = config.user.trim().replace(/^"|"$/g, '');
+        // Automatically removes all spaces just in case they were copied over
+        const cleanPass = config.pass.trim().replace(/^"|"$/g, '').replace(/\s+/g, '');
+
+        // Dynamic: AI can set the recipient, subject, and body via email_to, email_subject, email_body
+        // Falls back to hardcoded config values if AI didn't provide them
+        let to = config.to || input.email_to;
+
+        // Smart Fallback: If Gemini failed to format with "TO:", scan the AI's entire output for ANY email address
+        if ((!to || !to.includes('@')) && input.ai_text) {
+            console.log("-> AI Output received from Gemini:", input.ai_text.replace(/\n/g, ' '));
+            const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+            const match = input.ai_text.match(emailRegex);
+            if (match) to = match[0];
+        }
+
+        // Clean up rogue brackets if Gemini outputted <email@test.com>
+        if (to) to = to.replace(/[<>]/g, '').trim();
+
+        console.log("-> Final Recipient (To):", to || "NONE FOUND!");
+
+        const subject = config.subject || input.email_subject || "AgenXNodes Notification";
+        const body = config.text || input.email_body || input.ai_text || input.form_text || "No Content";
+
+        if (!to || !to.includes('@')) {
+            console.error("❌ [EMAIL NODE] ERROR: No valid email address found.");
+            throw new Error(`Could not find any email address to send to! AI output was: "${(input.ai_text || '').substring(0, 100)}..."`);
+        }
+
+        try {
+            console.log("-> Attempting to authenticate with Gmail...");
+            const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: cleanUser, pass: cleanPass } });
+            await transporter.verify();
+            console.log("✅ Gmail Authentication Successful!");
+            const info = await transporter.sendMail({ from: cleanUser, to, subject, text: body });
+            console.log("✅ Email Sent Successfully! Message ID:", info.messageId);
+            console.log("==============================================\n");
+            return { status: "Email Sent", to, subject };
+        } catch (error) {
+            console.error("❌ [EMAIL NODE] FATAL GMAIL ERROR:", error.message);
+            if (error.message.includes('Invalid login')) {
+                throw new Error("Gmail Error: App Password incorrect OR 2-Step Verification is not enabled on your Google Account.");
+            }
+            throw new Error(`Gmail Error: ${error.message}`);
+        }
     },
 
     'slack': async (config, input) => {
@@ -561,7 +672,7 @@ Be thorough, precise, and structure your output clearly.`;
             await safeAxios({
                 method: 'POST',
                 url: `https://api.telegram.org/bot${config.token}/sendMessage`,
-                data: { chat_id: config.chatId, text: msg, parse_mode: 'HTML' }
+                data: { chat_id: config.chatId, text: msg }
             });
             return { status: "Telegram Sent", chatId: config.chatId };
         } catch (e) {
@@ -708,12 +819,134 @@ Be thorough, precise, and structure your output clearly.`;
             return { status: "Simulated Sheet Update (add credentials for real)", data: input };
         }
         try {
-            const auth = new google.auth.JWT(config.client_email, null, config.private_key.replace(/\\n/g, '\n'), ['https://www.googleapis.com/auth/spreadsheets']);
+            // Clean up inputs (removes accidental quotes from JSON copy-pasting and fixes newlines)
+            const cleanEmail = config.client_email.trim().replace(/^"|"$/g, '');
+            const cleanKey = config.private_key.trim().replace(/^"|"$/g, '').replace(/\\n/g, '\n');
+            const cleanSheetId = config.sheetId.trim();
+
+            const auth = new google.auth.GoogleAuth({
+                credentials: { client_email: cleanEmail, private_key: cleanKey },
+                scopes: ['https://www.googleapis.com/auth/spreadsheets']
+            });
             const sheets = google.sheets({ version: 'v4', auth });
-            const values = [[new Date().toISOString(), input.form_text || "No Data", JSON.stringify(input)]];
-            await sheets.spreadsheets.values.append({ spreadsheetId: config.sheetId, range: 'Sheet1!A:A', valueInputOption: 'USER_ENTERED', resource: { values } });
-            return { status: "Row Added to Google Sheet", sheetId: config.sheetId };
+
+            const action = config.action || 'append';
+
+            if (action === 'read') {
+                const range = config.range || 'Sheet1!A:B'; // E.g., Column A for Name, Column B for Email
+                const res = await sheets.spreadsheets.values.get({
+                    spreadsheetId: cleanSheetId,
+                    range: range
+                });
+
+                const rows = res.data.values || [];
+                const formattedData = rows.map(row => row.join(' : ')).join('\n');
+                return {
+                    status: "Sheet Read Successfully",
+                    ai_text: `User Request:\n${input.form_text || input.ai_text || 'No request'}\n\nAvailable Contacts from Sheet:\n${formattedData}`
+                };
+            } else {
+                // Smart logging: if email data exists from upstream, log it in clean columns
+                // Columns: Timestamp | To | Subject | Body | Status
+                let values;
+                if (input.email_to || input.to) {
+                    values = [[
+                        new Date().toISOString(),
+                        input.email_to || input.to || "N/A",
+                        input.email_subject || input.subject || "N/A",
+                        input.email_body || input.ai_text || input.form_text || "N/A",
+                        input.status || "Sent"
+                    ]];
+                } else {
+                    // Try to extract and parse JSON from the AI output to spread into columns
+                    let parsedFields = null;
+                    try {
+                        if (input.ai_text) {
+                            // Find JSON block (even if inside markdown ```json ... ```)
+                            const jsonMatch = input.ai_text.match(/\{[\s\S]*\}/);
+                            if (jsonMatch) {
+                                parsedFields = Object.values(JSON.parse(jsonMatch[0]));
+                            }
+                        }
+                    } catch (e) {
+                        // Not JSON or parsing failed, fall back to generic logger
+                    }
+
+                    if (parsedFields && parsedFields.length > 0) {
+                        // Dynamic Columns: Timestamp | [Parsed JSON Values...]
+                        values = [[
+                            new Date().toISOString(),
+                            ...parsedFields
+                        ]];
+                    } else {
+                        // Generic Columns: Timestamp | AI Output
+                        values = [[
+                            new Date().toISOString(),
+                            input.ai_text || "N/A"
+                        ]];
+                    }
+                }
+
+                await sheets.spreadsheets.values.append({
+                    spreadsheetId: cleanSheetId,
+                    range: 'Sheet1!A:A',
+                    valueInputOption: 'USER_ENTERED',
+                    resource: { values }
+                });
+                return { status: "Row Added to Google Sheet", sheetId: cleanSheetId };
+            }
         } catch (e) { throw new Error(`Google Sheets Error: ${e.message}`); }
+    },
+    'whatsapp': async (config, input) => {
+        const accountSid = config.sid || config.accountSid;
+        const authToken = config.token || config.authToken;
+        const fromNumber = config.from || config.fromNumber;
+        const targetNumber = config.to || config.toNumber || input.fromNumber;
+
+        if (!accountSid) throw new Error("Missing Twilio Account SID");
+        if (!authToken) throw new Error("Missing Twilio Auth Token");
+        if (!fromNumber) throw new Error("Missing From Number");
+        if (!targetNumber) throw new Error("Missing To Number (could not detect from input either)");
+        
+        let msg = config.msg || input.ai_text || input.form_text || "Hello from AgenXNodes WhatsApp!";
+        
+        // Make the message beautiful if it's JSON data (for FYP demo)
+        if (msg === input.ai_text) {
+            try {
+                const jsonMatch = msg.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    const prettyFields = Object.entries(parsed).map(([key, val]) => `• *${key}*: ${val}`).join('\n');
+                    msg = `✅ *Success!*\nYour data is successfully added to Google Sheets:\n\n${prettyFields}`;
+                }
+            } catch (e) {
+                // If parsing fails, just use the raw text
+                msg = `✅ *Success! Data saved:*\n${msg}`;
+            }
+        }
+        
+        const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+        
+        const data = new URLSearchParams();
+        data.append('To', targetNumber.startsWith('whatsapp:') ? targetNumber : `whatsapp:${targetNumber}`);
+        data.append('From', fromNumber.startsWith('whatsapp:') ? fromNumber : `whatsapp:${fromNumber}`);
+        data.append('Body', msg);
+
+        try {
+            await safeAxios({
+                method: 'POST',
+                url,
+                data: data.toString(),
+                headers: { 
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64')
+                }
+            });
+            return { status: "WhatsApp Sent", to: targetNumber };
+        } catch (e) {
+            console.error("\n❌ [WhatsApp Node Error]:", e.response?.data || e.message);
+            throw new Error(`WhatsApp Error: ${e.response?.data?.message || e.message}`);
+        }
     },
 
     'airtable': async (config, input) => {
@@ -949,7 +1182,12 @@ Your goal is to generate a valid JSON object representing a node-based workflow.
                     error: `Failed to generate workflow after 3 attempts. ${e.message}. Try being more specific about what you want to automate.`
                 });
             }
-            await delay(1000);
+
+            const errMsg = e.response?.data?.error?.message || e.message || "";
+            const match = errMsg.match(/retry in ([\d\.]+)s/);
+            const waitTimeMs = match ? (parseFloat(match[1]) * 1000 + 1000) : 2000;
+            console.log(`[AI Generator Rate Limit] Retrying in ${Math.round(waitTimeMs / 1000)}s...`);
+            await delay(waitTimeMs);
         }
     }
 });
@@ -957,17 +1195,17 @@ Your goal is to generate a valid JSON object representing a node-based workflow.
 // ==========================================
 // 6. WORKFLOW ENGINE
 // ==========================================
-const TRIGGER_TYPES = ['manual', 'webhook', 'formTrigger', 'schedule', 'emailTrigger', 'apiPolling', 'chatTrigger', 'databaseTrigger'];
+const TRIGGER_TYPES = ['manual', 'webhook', 'formTrigger', 'schedule', 'emailTrigger', 'apiPolling', 'chatTrigger', 'databaseTrigger', 'telegramTrigger', 'whatsappTrigger'];
 
-const runWorkflow = async (nodes, edges) => {
+const runWorkflow = async (nodes, edges, initialData = {}, startNodeId = null, onProgress = null) => {
     let logs = [];
 
     // Find Start Node
-    let currentNode = nodes.find(n => TRIGGER_TYPES.includes(n.data.type));
+    let currentNode = startNodeId ? nodes.find(n => n.id === startNodeId) : nodes.find(n => TRIGGER_TYPES.includes(n.data.type));
 
-    if (!currentNode) throw new Error("Workflow must start with a trigger node (Manual, Form, Webhook, Schedule, Email, API Polling, Chat, or Database trigger).");
+    if (!currentNode) throw new Error("Workflow must start with a trigger node (Manual, Form, Webhook, Schedule, Email, API Polling, Chat, Telegram, or Database trigger).");
 
-    let currentData = {};
+    let currentData = { ...initialData };
     let steps = 0;
 
     while (currentNode && steps < 50) {
@@ -976,6 +1214,7 @@ const runWorkflow = async (nodes, edges) => {
         let branch = null;
 
         try {
+            if (onProgress) onProgress({ type: 'start', nodeId: currentNode.id });
             const handler = nodeHandlers[currentNode.data.type];
             if (handler) {
                 const execution = await handler(currentNode.data.config || {}, currentData);
@@ -985,9 +1224,14 @@ const runWorkflow = async (nodes, edges) => {
                 result = { ...currentData, note: `Unknown node type: ${currentNode.data.type}` };
             }
             currentData = { ...currentData, ...result };
-            logs.push({ nodeId: currentNode.id, label: currentNode.data.label, type: currentNode.data.type, output: result, status: 'success' });
+            const logEntry = { nodeId: currentNode.id, label: currentNode.data.label, type: currentNode.data.type, output: result, status: 'success' };
+            logs.push(logEntry);
+            if (onProgress) onProgress({ type: 'finish', log: logEntry });
         } catch (err) {
-            logs.push({ nodeId: currentNode.id, label: currentNode.data.label, type: currentNode.data.type, output: { error: err.message }, status: 'error' });
+            console.error(`\n❌ [Node Error in ${currentNode.data.label}]:`, err.message);
+            const logEntry = { nodeId: currentNode.id, label: currentNode.data.label, type: currentNode.data.type, output: { error: err.message }, status: 'error' };
+            logs.push(logEntry);
+            if (onProgress) onProgress({ type: 'finish', log: logEntry });
             break;
         }
 
@@ -1016,9 +1260,172 @@ app.post('/api/run', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.listen(PORT, () => {
+app.post('/api/run-stream', async (req, res) => {
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    const { nodes, edges } = req.body;
+    if (!nodes || nodes.length === 0) return res.end();
+
+    const onProgress = (data) => {
+        res.write(JSON.stringify(data) + '\n');
+    };
+
+    try {
+        await runWorkflow(nodes, edges || [], {}, null, onProgress);
+        res.write(JSON.stringify({ type: 'done' }) + '\n');
+        res.end();
+    } catch (e) {
+        res.write(JSON.stringify({ type: 'error', error: e.message }) + '\n');
+        res.end();
+    }
+});
+
+app.post('/api/webhooks/twilio', async (req, res) => {
+    // Twilio expects a quick 200 OK or TwiML response. 
+    // We send empty TwiML so Twilio knows we received it.
+    res.set('Content-Type', 'text/xml');
+    res.send('<Response></Response>');
+
+    const fromNumber = req.body.From;
+    const messageBody = req.body.Body;
+    if (!fromNumber || !messageBody) return;
+
+    if (mongoose.connection.readyState !== 1) {
+        console.error(`[Twilio Webhook] Received message but MongoDB is disconnected.`);
+        return;
+    }
+
+    try {
+        const workflows = await Workflow.find();
+        for (const wf of workflows) {
+            const triggerNode = wf.nodes.find(n => n.data.type === 'whatsappTrigger');
+            if (triggerNode) {
+                console.log(`\n[WhatsApp Trigger] Message received for workflow "${wf.name}": ${messageBody}`);
+                
+                // Run workflow in background
+                runWorkflow(wf.nodes, wf.edges, {
+                    form_text: messageBody,
+                    user_message: messageBody,
+                    ai_text: messageBody,
+                    fromNumber: fromNumber
+                }, triggerNode.id).then((logs) => {
+                    const errors = logs.filter(l => l.status === 'error');
+                    if (errors.length > 0) {
+                        console.error(`[Background Run] Workflow "${wf.name}" stopped due to an error in node "${errors[0].label}":`, errors[0].output.error);
+                    } else {
+                        const executedNodes = logs.map(l => l.label).join(' -> ');
+                        console.log(`[Background Run] Finished WhatsApp workflow "${wf.name}" successfully! Executed: ${executedNodes}`);
+                    }
+                }).catch(e => {
+                    console.error(`[Background Run] Failed WhatsApp workflow "${wf.name}":`, e);
+                });
+            }
+        }
+    } catch (e) {
+        console.error(`[Twilio Webhook Error]: ${e.message}`);
+    }
+});
+
+// ==========================================
+// 6.5 BACKGROUND TELEGRAM POLLING
+// ==========================================
+const telegramOffsets = {};
+
+const startTelegramPolling = async () => {
+    // Only run if DB is connected
+    if (mongoose.connection.readyState !== 1) {
+        setTimeout(startTelegramPolling, 5000);
+        return;
+    }
+
+    try {
+        const workflows = await Workflow.find();
+        
+        for (const wf of workflows) {
+            const triggerNode = wf.nodes.find(n => n.data.type === 'telegramTrigger');
+            if (triggerNode && triggerNode.data.config && triggerNode.data.config.token) {
+                const token = triggerNode.data.config.token;
+                const offset = telegramOffsets[token] || 0;
+                
+                try {
+                    const res = await safeAxios({
+                        method: 'GET',
+                        url: `https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=2`
+                    });
+                    
+                    if (res.data && res.data.ok && res.data.result.length > 0) {
+                        for (const update of res.data.result) {
+                            telegramOffsets[token] = update.update_id + 1;
+                            
+                            if (update.message && update.message.text) {
+                                console.log(`\n[Telegram Trigger] Message received for workflow "${wf.name}": ${update.message.text}`);
+                                
+                                // Run workflow in background
+                                runWorkflow(wf.nodes, wf.edges, {
+                                    form_text: update.message.text,
+                                    user_message: update.message.text,
+                                    chatId: update.message.chat.id,
+                                    ai_text: update.message.text
+                                }, triggerNode.id).then(() => {
+                                    console.log(`[Background Run] Finished workflow "${wf.name}" successfully.`);
+                                }).catch(e => {
+                                    console.error(`[Background Run] Failed workflow "${wf.name}":`, e);
+                                });
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error(`[Telegram Polling Error for ${wf.name}]: ${e.message}`);
+                }
+            }
+        }
+    } catch (e) {
+        console.error(`[Telegram Polling Loop Error]: ${e.message}`);
+    }
+    
+    setTimeout(startTelegramPolling, 3000);
+};
+
+// Start poller shortly after server starts
+setTimeout(startTelegramPolling, 5000);
+
+// ==========================================
+// 7. START SERVER
+// ==========================================
+console.log(`\n[DEBUG] About to start server on ${HOST}:${PORT}...`);
+
+const server = app.listen(PORT, HOST, () => {
     console.log(`\n================================`);
     console.log(`🚀 Server Running on Port ${PORT}`);
+    console.log(`🌍 Bound to Host: ${HOST}`);
     console.log(`🔗 http://localhost:${PORT}`);
     console.log(`================================\n`);
+    console.log(`[DEBUG] Server is now listening and accepting connections...`);
+});
+
+// Handle server errors
+server.on('error', (err) => {
+    console.error(`[DEBUG] Server error event fired:`, err);
+    if (err.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} is already in use`);
+    } else {
+        console.error(`❌ Server Error:`, err);
+    }
+    process.exit(1);
+});
+
+server.on('close', () => {
+    console.log('[DEBUG] Server close event fired');
+});
+
+console.log('[DEBUG] Server object created, error handlers attached');
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+    console.log('\n⏹️  Server shutting down gracefully...');
+    server.close(() => {
+        console.log('✅ Server closed');
+        process.exit(0);
+    });
 });

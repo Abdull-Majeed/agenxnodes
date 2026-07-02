@@ -14,7 +14,7 @@ const Dashboard = () => {
     const fetchWorkflows = async () => {
       setLoading(true);
       try {
-        const { data } = await axios.get('http://localhost:5005/api/workflows', {
+        const { data } = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5005'}/api/workflows`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setWorkflows(data);
@@ -40,7 +40,7 @@ const Dashboard = () => {
     if (!name) return;
     try {
       const { data } = await axios.post(
-        'http://localhost:5005/api/workflows',
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5005'}/api/workflows`,
         { name, nodes: [], edges: [] },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -53,7 +53,7 @@ const Dashboard = () => {
   const deleteWorkflow = async (id, e) => {
     e.stopPropagation();
     if (!window.confirm("Are you sure you want to delete this workflow?")) return;
-    await axios.delete(`http://localhost:5005/api/workflows/${id}`, {
+    await axios.delete(`${import.meta.env.VITE_API_URL || 'http://localhost:5005'}/api/workflows/${id}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     setWorkflows((prev) => prev.filter((w) => w._id !== id));
