@@ -80,13 +80,20 @@ const Login = () => {
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-600">Password</label>
-              <input
-                type="password"
-                placeholder="Enter your password"
-                value={creds.password}
-                onChange={(e) => setCreds({ ...creds, password: e.target.value })}
-                className="mt-2 w-full rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20"
-              />
+              <div className="flex items-center justify-between mt-2">
+                <input
+                  type="password"
+                  placeholder="Enter your password"
+                  value={creds.password}
+                  onChange={(e) => setCreds({ ...creds, password: e.target.value })}
+                  className="w-full rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+              <div className="flex justify-end mt-1">
+                <Link to="/forgot-password" className="text-xs font-semibold text-indigo-600 hover:text-indigo-500">
+                  Forgot Password?
+                </Link>
+              </div>
             </div>
             <button
               type="submit"

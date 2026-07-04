@@ -44,7 +44,15 @@ mongoose.connect(MONGO_URI)
         console.error("-> Server will continue running without database.");
     });
 
-const UserSchema = new mongoose.Schema({ username: { type: String, unique: true }, password: String });
+const crypto = require('crypto');
+
+const UserSchema = new mongoose.Schema({ 
+    username: { type: String, unique: true }, 
+    email: { type: String, unique: true, sparse: true },
+    password: String,
+    resetPasswordToken: String,
+    resetPasswordExpires: Date
+});
 const WorkflowSchema = new mongoose.Schema({ userId: mongoose.Schema.Types.ObjectId, name: String, nodes: Array, edges: Array, createdAt: { type: Date, default: Date.now } });
 const User = mongoose.model('User', UserSchema);
 const Workflow = mongoose.model('Workflow', WorkflowSchema);
@@ -61,15 +69,83 @@ const auth = (req, res, next) => {
 
 app.post('/api/auth/signup', async (req, res) => {
     try {
-        const { username, password } = req.body;
-        if (!username || !password) return res.status(400).json({ error: "Username and password are required" });
-        if (password.length < 4) return res.status(400).json({ error: "Password must be at least 4 characters" });
-        const existing = await User.findOne({ username });
-        if (existing) return res.status(409).json({ error: "Username already exists" });
+        const { username, password, email } = req.body;
+        if (!username || !password || !email) return res.status(400).json({ error: "Username, email, and password are required" });
+        if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+        
+        const existingUsername = await User.findOne({ username });
+        if (existingUsername) return res.status(409).json({ error: "Username already exists" });
+
+        const existingEmail = await User.findOne({ email });
+        if (existingEmail) return res.status(409).json({ error: "Email already exists" });
+
         const hashedPassword = await bcrypt.hash(password, 10);
-        const user = new User({ username, password: hashedPassword });
+        const user = new User({ username, email, password: hashedPassword });
         await user.save();
         res.json({ message: "User Created" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+    try {
+        const { email } = req.body;
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "User with this email does not exist." });
+
+        const token = crypto.randomBytes(20).toString('hex');
+        user.resetPasswordToken = token;
+        user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
+        await user.save();
+
+        const resetLink = `http://localhost:5173/reset-password/${token}`;
+
+        if (process.env.SYSTEM_EMAIL && process.env.SYSTEM_EMAIL_PASSWORD) {
+            const transporter = nodemailer.createTransport({
+                service: 'gmail',
+                auth: {
+                    user: process.env.SYSTEM_EMAIL,
+                    pass: process.env.SYSTEM_EMAIL_PASSWORD
+                }
+            });
+
+            const mailOptions = {
+                from: process.env.SYSTEM_EMAIL,
+                to: user.email,
+                subject: 'AgenXNodes Password Reset',
+                text: `You are receiving this because you (or someone else) requested a password reset for your account.\n\n` +
+                      `Please click on the following link to complete the process:\n\n` +
+                      `${resetLink}\n\n` +
+                      `If you did not request this, please ignore this email and your password will remain unchanged.\n`
+            };
+
+            await transporter.sendMail(mailOptions);
+            res.json({ message: "Password reset email sent." });
+        } else {
+            console.log("Password Reset Link (since SYSTEM_EMAIL is not configured):", resetLink);
+            res.json({ message: "Password reset email sent. (Check terminal since email is not configured)" });
+        }
+
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+    try {
+        const { token, newPassword } = req.body;
+        if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+
+        const user = await User.findOne({ 
+            resetPasswordToken: token, 
+            resetPasswordExpires: { $gt: Date.now() } 
+        });
+
+        if (!user) return res.status(400).json({ error: "Password reset token is invalid or has expired." });
+
+        user.password = await bcrypt.hash(newPassword, 10);
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpires = undefined;
+        await user.save();
+
+        res.json({ message: "Your password has been successfully changed." });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
