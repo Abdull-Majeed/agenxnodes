@@ -46,9 +46,12 @@ npm install
 Create a .env file in server/:
 ```
 PORT=5005
-MONGO_URI=mongodb://127.0.0.1:27017/agenxnodes
-JWT_SECRET=your_super_secure_secret
-GEMINI_API_KEY=your_google_ai_key
+HOST=0.0.0.0
+MONGO_URI=YOUR_MONGO_URI
+JWT_SECRET=JWT_SECRET_KEY
+GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+SYSTEM_EMAIL=YOUR_EMAIL_ADDRESS
+SYSTEM_EMAIL_PASSWORD=YOUR_EMAIL_PASSWORD
 ```
 
 ### 3. Start Server
@@ -58,10 +61,12 @@ node index.js
 
 ### 4. Frontend (Client)
 ```bash
-cd client
 npm install
 npm run dev
 ```
 
 ### 5. Access
 Open: http://localhost:5173
+
+---
+
