@@ -68,5 +68,9 @@ npm run dev
 ### 5. Access
 Open: http://localhost:5173
 
+
+### 6. You can view it here
+Open: https://agenxnodes.vercel.app/
+
 ---
 
