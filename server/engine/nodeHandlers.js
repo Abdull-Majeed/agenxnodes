@@ -515,7 +515,9 @@ Be thorough, precise, and structure your output clearly.`;
         try {
             console.log("-> Attempting to authenticate with Gmail...");
             const transporter = nodemailer.createTransport({ 
-                service: 'gmail', 
+                host: 'smtp.gmail.com',
+                port: 465,
+                secure: true,
                 auth: { user: cleanUser, pass: cleanPass },
                 connectionTimeout: 10000,
                 greetingTimeout: 10000,
