@@ -514,7 +514,13 @@ Be thorough, precise, and structure your output clearly.`;
 
         try {
             console.log("-> Attempting to authenticate with Gmail...");
-            const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: cleanUser, pass: cleanPass } });
+            const transporter = nodemailer.createTransport({ 
+                service: 'gmail', 
+                auth: { user: cleanUser, pass: cleanPass },
+                connectionTimeout: 10000,
+                greetingTimeout: 10000,
+                socketTimeout: 10000
+            });
             await transporter.verify();
             console.log("✅ Gmail Authentication Successful!");
             const info = await transporter.sendMail({ from: cleanUser, to, subject, text: body });
